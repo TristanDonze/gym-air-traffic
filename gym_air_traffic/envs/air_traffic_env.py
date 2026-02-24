@@ -179,7 +179,7 @@ class AirTrafficEnv(gym.Env):
                     if zone.validate_landing(plane):
                         
                         if plane.speed <= plane.landing_speed_limit:
-                            reward += 100
+                            reward += 150
                             plane.active = False
                         else:
                             reward -= 50 
@@ -193,7 +193,7 @@ class AirTrafficEnv(gym.Env):
             if not plane.active:
                 continue
             if plane.x < -50 or plane.x > self.width + 50 or plane.y < -50 or plane.y > self.height + 50:
-                penalty -= 10
+                penalty -= 50
                 plane.active = False 
         return penalty
 
