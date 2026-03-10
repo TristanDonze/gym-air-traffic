@@ -1,7 +1,3 @@
-from gymnasium.envs.registration import register
+from gym_air_traffic.envs.air_traffic_env import AirTrafficEnv
 
-register(
-    id="AirTraffic-v0",
-    entry_point="gym_air_traffic.envs:AirTrafficEnv",
-    max_episode_steps=1000
-)
+__all__ = ["AirTrafficEnv"]

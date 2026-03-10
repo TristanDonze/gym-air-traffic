@@ -3,14 +3,14 @@ import math
 import random
 import imageio
 import numpy as np
-import gymnasium as gym
 from gymnasium import spaces
+from pettingzoo.utils.env import ParallelEnv
 
 from gym_air_traffic.envs.entities import Aircraft, LandingZone
 from gym_air_traffic.envs.renderer import Renderer
 
-class AirTrafficEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+class AirTrafficEnv(ParallelEnv):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "air_traffic_v0"}
 
     def __init__(self, render_mode=None):
         super().__init__()
@@ -32,27 +32,44 @@ class AirTrafficEnv(gym.Env):
         self.max_wind_speed = 1.0
         self.wind_change_rate = 0.05
 
-        self.observation_space = spaces.Box(
-            low=-float("inf"),
-            high=float("inf"),
-            shape=(self.max_planes, 11),
-            dtype=np.float32
-        )
+        self.possible_agents = [f"plane_{i}" for i in range(self.max_planes)]
+        self.agents = []
+        self.planes_dict = {}
 
-        self.action_space = spaces.Box(
-            low=np.array([[-math.pi, -1.0]] * self.max_planes, dtype=np.float32),
-            high=np.array([[math.pi, 1.0]] * self.max_planes, dtype=np.float32),
-            dtype=np.float32
-        )
+        self.observation_spaces = {
+            agent: spaces.Box(
+                low=-float("inf"),
+                high=float("inf"),
+                shape=(11,),
+                dtype=np.float32
+            ) for agent in self.possible_agents
+        }
 
-        self.planes = [None] * self.max_planes
+        self.action_spaces = {
+            agent: spaces.Box(
+                low=np.array([-math.pi, -1.0], dtype=np.float32),
+                high=np.array([math.pi, 1.0], dtype=np.float32),
+                dtype=np.float32
+            ) for agent in self.possible_agents
+        }
+
         self.steps = 0
+
+    def observation_space(self, agent):
+        return self.observation_spaces[agent]
+
+    def action_space(self, agent):
+        return self.action_spaces[agent]
 
     def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.planes = [None] * self.max_planes
+        self.agents = []
+        self.planes_dict = {}
         self.steps = 0
         
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+            
         angle = random.uniform(0, 2 * math.pi)
         strength = random.uniform(0, self.max_wind_speed)
         self.wind_vector = np.array([
@@ -60,16 +77,25 @@ class AirTrafficEnv(gym.Env):
             strength * math.sin(angle)
         ])
         
-        return self._get_obs(), {}
+        self._spawn_planes()
+        
+        observations = {agent: self._get_single_obs(agent) for agent in self.agents}
+        infos = {agent: {} for agent in self.agents}
+        
+        return observations, infos
 
-    def step(self, action):
+    def step(self, actions):
         self.steps += 1
-        reward = -1.0
-        terminated = False
-        truncated = False
+        
+        observations = {}
+        rewards = {agent: -1.0 for agent in self.agents}
+        terminations = {agent: False for agent in self.agents}
+        truncations = {agent: False for agent in self.agents}
+        infos = {agent: {} for agent in self.agents}
 
         if self.steps >= 1000:
-            truncated = True
+            for agent in self.agents:
+                truncations[agent] = True
 
         noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
         self.wind_vector += noise
@@ -78,37 +104,37 @@ class AirTrafficEnv(gym.Env):
         if current_wind_speed > self.max_wind_speed:
             self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
 
-        self._spawn_planes()
-
-        for i in range(self.max_planes):
-            plane = self.planes[i]
-            if plane is not None and plane.active:
-                command = action[i]
+        for agent in self.agents:
+            if agent in actions and self.planes_dict[agent].active:
+                command = actions[agent]
+                plane = self.planes_dict[agent]
                 plane.change_heading(command[0])
                 plane.change_speed(command[1])
                 plane.move(self.wind_vector)
 
-        reward += self._check_collisions()
-        reward += self._check_landings()
-        reward += self._check_out_of_bounds()
+        self._check_collisions(rewards, terminations)
+        self._check_landings(rewards, terminations)
+        self._check_out_of_bounds(rewards, terminations)
 
-        if reward <= -200:
-            terminated = True
+        agents_to_remove = [agent for agent in self.agents if terminations[agent] or truncations[agent]]
+        for agent in agents_to_remove:
+            self.agents.remove(agent)
 
-        self._clean_inactive_planes()
+        self._spawn_planes()
 
-        observation = self._get_obs()
-        
-        active_plane_count = sum(1 for p in self.planes if p is not None and p.active)
-        info = {"plane_count": active_plane_count}
+        for agent in self.agents:
+            observations[agent] = self._get_single_obs(agent)
 
         if self.render_mode == "human":
             self.render()
 
-        return observation, reward, terminated, truncated, info
+        if not self.agents:
+            self.agents = []
+
+        return observations, rewards, terminations, truncations, infos
 
     def render(self):
-        active_planes = [p for p in self.planes if p is not None and p.active]
+        active_planes = [self.planes_dict[agent] for agent in self.agents if self.planes_dict[agent].active]
         return self.renderer.draw(self.render_mode, active_planes, self.zones, self.wind_vector)
 
     def close(self):
@@ -119,19 +145,21 @@ class AirTrafficEnv(gym.Env):
         file_path = os.path.join(folder_path, filename)
         
         if not frames:
-            print("Error : The frames list is empty. Nothing to save.")
+            print("Error: The frames list is empty. Nothing to save.")
             return
 
         try:
             imageio.mimsave(file_path, frames, fps=fps, macro_block_size=1)
-            print(f"Video saved successfully: {file_path} ({len(frames)} frames)")
+            print(f"Video saved successfully: {file_path}")
         except Exception as e:
             print(f"Error saving video: {e}")
 
     def _spawn_planes(self):
-        empty_slots = [i for i, p in enumerate(self.planes) if p is None]
-        
-        if empty_slots and random.random() < self.spawn_rate:
+        if len(self.agents) < self.max_planes and random.random() < self.spawn_rate:
+            available_agents = [a for a in self.possible_agents if a not in self.agents]
+            if not available_agents:
+                return
+                
             side = random.choice(["top", "bottom", "left", "right"])
             if side == "top":
                 x, y, h = random.uniform(0, self.width), 0, math.pi/2
@@ -156,92 +184,90 @@ class AirTrafficEnv(gym.Env):
                 dest_id = 2
                 speed = 1.5
             
+            new_agent_id = random.choice(available_agents)
             new_plane = Aircraft(x, y, speed=speed, heading=h, plane_type=p_type, destination_id=dest_id)
-            slot = random.choice(empty_slots)
-            self.planes[slot] = new_plane
+            
+            self.planes_dict[new_agent_id] = new_plane
+            self.agents.append(new_agent_id)
 
-    def _check_collisions(self):
-        penalty = 0
-        active_planes = [p for p in self.planes if p is not None and p.active]
-        n = len(active_planes)
+    def _check_collisions(self, rewards, terminations):
+        current_agents = list(self.agents)
+        n = len(current_agents)
         for i in range(n):
             for j in range(i + 1, n):
-                p1 = active_planes[i]
-                p2 = active_planes[j]
+                agent1 = current_agents[i]
+                agent2 = current_agents[j]
+                
+                if terminations.get(agent1, False) or terminations.get(agent2, False):
+                    continue
+                    
+                p1 = self.planes_dict[agent1]
+                p2 = self.planes_dict[agent2]
+                
                 dist = math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
                 if dist < 30: 
-                    penalty -= 100
+                    rewards[agent1] -= 100
+                    rewards[agent2] -= 100
+                    terminations[agent1] = True
+                    terminations[agent2] = True
                     p1.active = False
                     p2.active = False
-        return penalty
 
-    def _check_landings(self):
-        reward = 0
-        for plane in self.planes:
-            if plane is None or not plane.active:
+    def _check_landings(self, rewards, terminations):
+        for agent in self.agents:
+            if terminations.get(agent, False):
                 continue
                 
+            plane = self.planes_dict[agent]
             for zone in self.zones:
                 if zone.id == plane.destination_id:
                     if zone.validate_landing(plane):
                         if plane.speed <= plane.landing_speed_limit:
-                            reward += 150
-                            plane.active = False
+                            rewards[agent] += 150
                         else:
-                            reward -= 50 
-                            plane.active = False
-                            
-        return reward
+                            rewards[agent] -= 50
+                        terminations[agent] = True
+                        plane.active = False
+                        break
 
-    def _check_out_of_bounds(self):
-        penalty = 0
-        for plane in self.planes:
-            if plane is None or not plane.active:
+    def _check_out_of_bounds(self, rewards, terminations):
+        for agent in self.agents:
+            if terminations.get(agent, False):
                 continue
+                
+            plane = self.planes_dict[agent]
             if plane.x < -50 or plane.x > self.width + 50 or plane.y < -50 or plane.y > self.height + 50:
-                penalty -= 50
-                plane.active = False 
-        return penalty
+                rewards[agent] -= 50
+                terminations[agent] = True
+                plane.active = False
 
-    def _clean_inactive_planes(self):
-        for i in range(self.max_planes):
-            if self.planes[i] is not None and not self.planes[i].active:
-                self.planes[i] = None
-
-    def _get_obs(self):
-        obs = np.zeros((self.max_planes, 11), dtype=np.float32)
-        
+    def _get_single_obs(self, agent):
+        plane = self.planes_dict[agent]
         wx_norm = self.wind_vector[0] / self.max_wind_speed
         wy_norm = self.wind_vector[1] / self.max_wind_speed
         
-        for i in range(self.max_planes):
-            plane = self.planes[i]
-            if plane is None:
-                continue
-            
-            target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
-            tx, ty = (target_zone.x, target_zone.y) if target_zone else (0, 0)
-            
-            if plane.type == "jet_red":
-                t_val = 0.0
-            elif plane.type == "jet_blue":
-                t_val = 0.5
-            else:
-                t_val = 1.0
+        target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
+        tx, ty = (target_zone.x, target_zone.y) if target_zone else (0, 0)
+        
+        if plane.type == "jet_red":
+            t_val = 0.0
+        elif plane.type == "jet_blue":
+            t_val = 0.5
+        else:
+            t_val = 1.0
 
-            state = [
-                plane.x / self.width,
-                plane.y / self.height,
-                (plane.speed - plane.min_speed) / (plane.max_speed - plane.min_speed),
-                math.cos(plane.heading),
-                math.sin(plane.heading),
-                tx / self.width,
-                ty / self.height,
-                t_val,
-                wx_norm,
-                wy_norm,
-                1.0,
-            ]
-            obs[i] = state
-            
-        return obs
+        state = np.array([
+            plane.x / self.width,
+            plane.y / self.height,
+            (plane.speed - plane.min_speed) / (plane.max_speed - plane.min_speed),
+            math.cos(plane.heading),
+            math.sin(plane.heading),
+            tx / self.width,
+            ty / self.height,
+            t_val,
+            wx_norm,
+            wy_norm,
+            1.0,
+        ], dtype=np.float32)
+        
+        return state
