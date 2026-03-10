@@ -23,7 +23,7 @@ class AirTrafficEnv(gym.Env):
         self.spawn_rate = 0.05 
         
         self.zones = [
-            LandingZone(600, 200,0, "runway_red", 0),
+            LandingZone(600, 200, 0, "runway_red", 0),
             LandingZone(600, 500, 0, "runway_blue", 1),
             LandingZone(150, 450, 0, "helipad", 2)
         ]
@@ -45,12 +45,12 @@ class AirTrafficEnv(gym.Env):
             dtype=np.float32
         )
 
-        self.planes = []
+        self.planes = [None] * self.max_planes
         self.steps = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.planes = []
+        self.planes = [None] * self.max_planes
         self.steps = 0
         
         angle = random.uniform(0, 2 * math.pi)
@@ -80,8 +80,9 @@ class AirTrafficEnv(gym.Env):
 
         self._spawn_planes()
 
-        for i, plane in enumerate(self.planes):
-            if i < len(action) and plane.active:
+        for i in range(self.max_planes):
+            plane = self.planes[i]
+            if plane is not None and plane.active:
                 command = action[i]
                 plane.change_heading(command[0])
                 plane.change_speed(command[1])
@@ -97,7 +98,9 @@ class AirTrafficEnv(gym.Env):
         self._clean_inactive_planes()
 
         observation = self._get_obs()
-        info = {"plane_count": len(self.planes)}
+        
+        active_plane_count = sum(1 for p in self.planes if p is not None and p.active)
+        info = {"plane_count": active_plane_count}
 
         if self.render_mode == "human":
             self.render()
@@ -105,7 +108,8 @@ class AirTrafficEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def render(self):
-        return self.renderer.draw(self.render_mode, self.planes, self.zones, self.wind_vector)
+        active_planes = [p for p in self.planes if p is not None and p.active]
+        return self.renderer.draw(self.render_mode, active_planes, self.zones, self.wind_vector)
 
     def close(self):
         self.renderer.close()
@@ -125,7 +129,9 @@ class AirTrafficEnv(gym.Env):
             print(f"Error saving video: {e}")
 
     def _spawn_planes(self):
-        if len(self.planes) < self.max_planes and random.random() < self.spawn_rate:
+        empty_slots = [i for i, p in enumerate(self.planes) if p is None]
+        
+        if empty_slots and random.random() < self.spawn_rate:
             side = random.choice(["top", "bottom", "left", "right"])
             if side == "top":
                 x, y, h = random.uniform(0, self.width), 0, math.pi/2
@@ -151,11 +157,12 @@ class AirTrafficEnv(gym.Env):
                 speed = 1.5
             
             new_plane = Aircraft(x, y, speed=speed, heading=h, plane_type=p_type, destination_id=dest_id)
-            self.planes.append(new_plane)
+            slot = random.choice(empty_slots)
+            self.planes[slot] = new_plane
 
     def _check_collisions(self):
         penalty = 0
-        active_planes = [p for p in self.planes if p.active]
+        active_planes = [p for p in self.planes if p is not None and p.active]
         n = len(active_planes)
         for i in range(n):
             for j in range(i + 1, n):
@@ -171,13 +178,12 @@ class AirTrafficEnv(gym.Env):
     def _check_landings(self):
         reward = 0
         for plane in self.planes:
-            if not plane.active:
+            if plane is None or not plane.active:
                 continue
                 
             for zone in self.zones:
                 if zone.id == plane.destination_id:
                     if zone.validate_landing(plane):
-                        
                         if plane.speed <= plane.landing_speed_limit:
                             reward += 150
                             plane.active = False
@@ -190,7 +196,7 @@ class AirTrafficEnv(gym.Env):
     def _check_out_of_bounds(self):
         penalty = 0
         for plane in self.planes:
-            if not plane.active:
+            if plane is None or not plane.active:
                 continue
             if plane.x < -50 or plane.x > self.width + 50 or plane.y < -50 or plane.y > self.height + 50:
                 penalty -= 50
@@ -198,7 +204,9 @@ class AirTrafficEnv(gym.Env):
         return penalty
 
     def _clean_inactive_planes(self):
-        self.planes = [p for p in self.planes if p.active]
+        for i in range(self.max_planes):
+            if self.planes[i] is not None and not self.planes[i].active:
+                self.planes[i] = None
 
     def _get_obs(self):
         obs = np.zeros((self.max_planes, 11), dtype=np.float32)
@@ -206,9 +214,10 @@ class AirTrafficEnv(gym.Env):
         wx_norm = self.wind_vector[0] / self.max_wind_speed
         wy_norm = self.wind_vector[1] / self.max_wind_speed
         
-        for i, plane in enumerate(self.planes):
-            if i >= self.max_planes:
-                break
+        for i in range(self.max_planes):
+            plane = self.planes[i]
+            if plane is None:
+                continue
             
             target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
             tx, ty = (target_zone.x, target_zone.y) if target_zone else (0, 0)
