@@ -9,6 +9,7 @@ setup(
         "gymnasium",
         "pygame",
         "numpy",
-        "imageio[ffmpeg]"
+        "imageio[ffmpeg]",
+        "pettingzoo"
     ]
 )

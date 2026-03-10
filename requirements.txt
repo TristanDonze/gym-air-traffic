@@ -1,1 +1,5 @@
-recursive-include gym_air_traffic/assets *
+gymnasium
+pygame
+numpy
+imageio[ffmpeg]
+pettingzoo
