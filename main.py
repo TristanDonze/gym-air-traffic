@@ -1,40 +1,44 @@
-import gymnasium as gym
-import gym_air_traffic
-import numpy as np
 import os
+import numpy as np
+from gym_air_traffic.envs.air_traffic_env import AirTrafficEnv
 
 def main():
-    env = gym.make("AirTraffic-v0", render_mode="rgb_array")
+    env = AirTrafficEnv(render_mode="rgb_array")
     
     frames = []
-    observation, info = env.reset()
+    observations, infos = env.reset()
     i = 0
     actual_return = 0.0
+    
     print("Environment reset. Starting simulation...")
 
     try:
-        while True:
-            action = env.action_space.sample()
-            observation, reward, terminated, truncated, info = env.step(action)
-            actual_return += reward
+        while env.steps < 1000:
+            actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+            
+            observations, rewards, terminations, truncations, infos = env.step(actions)
+            
+            step_reward = sum(rewards.values()) if rewards else 0.0
+            actual_return += step_reward
             
             frame = env.render()
             if frame is not None:
                 frames.append(frame)
 
-            if terminated or truncated:
-                print("Episode finished.")
-                break
-
             if i % 100 == 0:
-                print(f"Step {i}, Return: {actual_return}, Latest Reward: {reward}, Observation Shape: {observation.shape}, Observation : {observation}")
+                print(f"Step {i}, Return: {actual_return:.2f}, Active agents: {len(env.agents)}")
+                for obs_id, obs in observations.items():
+                    print(f"  Agent {obs_id}: Shape {obs.shape}, Sample values: {obs.flatten()[:5]}")
+            
             i += 1
+            
+        print("Episode finished.")
 
     except KeyboardInterrupt:
         print("Simulation stopped by user.")
     
     print(f"End of simulation. Captured {len(frames)} frames.")
-    env.unwrapped.save_video("videos", frames, filename="simulation.mp4", fps=30)
+    env.save_video("videos", frames, filename="simulation.mp4", fps=30)
     env.close()
 
 if __name__ == "__main__":

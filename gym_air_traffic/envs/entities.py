@@ -17,7 +17,7 @@ class Aircraft:
         
         self.landing_speed_limit = 2.5 
 
-        self.turn_rate = 0.05 if plane_type == "jet" else 0.08
+        self.turn_rate = 0.05 if plane_type == "jet_red" or plane_type == "jet_blue" else 0.08
 
     def move(self, wind_vector):
         dx_plane = self.speed * math.cos(self.heading)
@@ -26,18 +26,14 @@ class Aircraft:
         self.x += dx_plane + wind_vector[0]
         self.y += dy_plane + wind_vector[1]
         
-    def change_heading(self, target_heading):
-        diff = (target_heading - self.heading + math.pi) % (2 * math.pi) - math.pi
-        
-        step = np.clip(diff, -self.turn_rate, self.turn_rate)
+    def change_heading(self, steering_command):
+        step = np.clip(steering_command, -1.0, 1.0) * self.turn_rate
         self.heading += step
-        
         self.heading = (self.heading + math.pi) % (2 * math.pi) - math.pi
     
     def change_speed(self, throttle_command):
-        delta = throttle_command * self.accel_rate
+        delta = np.clip(throttle_command, -1.0, 1.0) * self.accel_rate
         self.speed += delta
-        
         self.speed = np.clip(self.speed, self.min_speed, self.max_speed)
 
     def get_pos(self):
