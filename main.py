@@ -8,22 +8,27 @@ def main():
     
     frames = []
     observation, info = env.reset()
+    i = 0
+    actual_return = 0.0
     print("Environment reset. Starting simulation...")
 
     try:
         while True:
             action = env.action_space.sample()
             observation, reward, terminated, truncated, info = env.step(action)
+            actual_return += reward
             
             frame = env.render()
             if frame is not None:
                 frames.append(frame)
 
-            print(reward)
-
             if terminated or truncated:
                 print("Episode finished.")
                 break
+
+            if i % 100 == 0:
+                print(f"Step {i}, Return: {actual_return}, Latest Reward: {reward}, Observation Shape: {observation.shape}, Observation : {observation}")
+            i += 1
 
     except KeyboardInterrupt:
         print("Simulation stopped by user.")
