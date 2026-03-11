@@ -15,7 +15,8 @@ Gym Air Traffic is a 2D simulation where an agent must guide multiple aircraft (
 
 
 * Physics-Based Movement: Aircraft have inertia, turning rates, and optional acceleration and wind drift mechanics.
-* One-Time Spawning: Aircraft are spawned progressively (checking for safe distances). Once an aircraft lands, crashes, or flies out of bounds, it is permanently disabled for the remainder of the episode.
+* One-Time Spawning: Aircraft all spawn at the beginning of the episode (checking for safe distances). Once an aircraft lands, crashes, or flies out of bounds, it is permanently disabled for the remainder of the episode.
+* Strict Termination Masking: Unspawned and destroyed aircraft continuously report a terminal state. This ensures compatibility with PettingZoo wrappers like `black_death_v3` to mask inactive agents during training.
 * Ego-Centric Observations: Each agent observes the environment from its own perspective. Inactive or dead agents are masked to maintain tensor stability.
 
 ## Installation
@@ -60,7 +61,7 @@ Only the Steering command (Index 0) is available. The aircraft will maintain its
 
 The observation space is ego-centric. Its size is calculated dynamically based on the `max_planes` and `enable_wind` parameters: `base_features + ((max_planes - 1) * 6)`.
 
-* `base_features` is 12 if `enable_wind=True`, and 10 if `enable_wind=False`.
+* `base_features` is 14 if `enable_wind=True`, and 12 if `enable_wind=False`.
 * If a plane slot is inactive (has not spawned yet, or has already terminated), its entire observation vector is filled with `-1.0`.
 
 **Part 1: Ego State (Indices 0 to 9 or 11)**
@@ -73,13 +74,15 @@ Represents the current agent's state and target:
 | 2 | speed | Current speed (normalized between min and max speed). |
 | 3 | cos(heading) | Cosine of the current heading angle. |
 | 4 | sin(heading) | Sine of the current heading angle. |
-| 5 | dx_target | Relative X distance to the landing zone (normalized). |
-| 6 | dy_target | Relative Y distance to the landing zone (normalized). |
-| 7 | cos(target_angle) | Cosine of the target landing zone angle. |
-| 8 | sin(target_angle) | Sine of the target landing zone angle. |
-| 9 | type_id | 0.0 (Red Jet), 0.5 (Blue Jet), 1.0 (Helicopter). |
-| 10 | wind_x | Optional: X component of the global wind vector (normalized). |
-| 11 | wind_y | Optional: Y component of the global wind vector (normalized). |
+| 5 | cos(rel_heading) | Cosine of the angle between current heading and target zone. |
+| 6 | sin(rel_heading) | Sine of the angle between current heading and target zone. |
+| 7 | dx_target | Relative X distance to the landing zone (normalized). |
+| 8 | dy_target | Relative Y distance to the landing zone (normalized). |
+| 9 | cos(target_angle) | Cosine of the target landing zone angle. |
+| 10 | sin(target_angle) | Sine of the target landing zone angle. |
+| 11 | type_id | 0.0 (Red Jet), 0.5 (Blue Jet), 1.0 (Helicopter). |
+| 12 | wind_x | Optional: X component of the global wind vector (normalized). |
+| 13 | wind_y | Optional: Y component of the global wind vector (normalized). |
 
 **Part 2: Radar State**
 The remaining values represent the relative states of the other potential aircraft in the environment. Each other aircraft occupies a block of 6 values:
