@@ -141,9 +141,9 @@ class AirTrafficEnv(ParallelEnv):
                         if abs(angle_diff) < 0.5:
                             rewards[agent] += 0.5
 
-        self._check_collisions(rewards)
-        self._check_landings(rewards)
-        self._check_out_of_bounds(rewards)
+        self._check_collisions(rewards, terminations)
+        self._check_landings(rewards, terminations)
+        self._check_out_of_bounds(rewards, terminations)
 
         self._spawn_planes()
 
@@ -218,7 +218,7 @@ class AirTrafficEnv(ParallelEnv):
                 self.planes_dict[new_agent_id] = new_plane
                 self.total_spawned += 1
 
-    def _check_collisions(self, rewards):
+    def _check_collisions(self, rewards, terminations):
         n = len(self.agents)
         for i in range(n):
             for j in range(i + 1, n):
@@ -232,8 +232,10 @@ class AirTrafficEnv(ParallelEnv):
                         rewards[a2] -= 100.0
                         p1.active = False
                         p2.active = False
+                        terminations[a1] = True
+                        terminations[a2] = True
 
-    def _check_landings(self, rewards):
+    def _check_landings(self, rewards, terminations):
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
@@ -244,15 +246,17 @@ class AirTrafficEnv(ParallelEnv):
                         else:
                             rewards[agent] -= 50.0
                         plane.active = False
+                        terminations[agent] = True
                         break
 
-    def _check_out_of_bounds(self, rewards):
+    def _check_out_of_bounds(self, rewards, terminations):
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
                 if plane.x < -50 or plane.x > self.width + 50 or plane.y < -50 or plane.y > self.height + 50:
                     rewards[agent] -= 200.0
                     plane.active = False
+                    terminations[agent] = True
 
     def _get_single_obs(self, agent):
         plane = self.planes_dict[agent]
