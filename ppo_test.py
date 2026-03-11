@@ -41,22 +41,25 @@ def main():
         tensorboard_log=log_dir,
         batch_size=256,
         gamma=0.99,
-        ent_coef=0.05,
+        ent_coef=0.01,
         policy_kwargs=dict(net_arch=[128, 128])
     )
 
-    print("Starting training...")
+    learn = False
+    if learn:
+        print("Starting training...")
 
-    os.makedirs("models", exist_ok=True)
-    
-    model.learn(total_timesteps=3_000_000, tb_log_name="ppo_air_traffic", callback=callback)
-    model.save("models/ppo_air_traffic")
-    print("Training finished and model saved.")
+        os.makedirs("models", exist_ok=True)
+        
+        model.learn(total_timesteps=3_000_000, tb_log_name="ppo_air_traffic", callback=callback)
+        model.save("models/ppo_air_traffic")
+        print("Training finished and model saved.")
 
-    results_plotter.plot_results([log_dir], 500_000, results_plotter.X_TIMESTEPS, "PPO Training Reward",figsize=(20, 12))
-    plt.savefig("models/reward_plot.png")
+        results_plotter.plot_results([log_dir], 500_000, results_plotter.X_TIMESTEPS, "PPO Training Reward",figsize=(20, 12))
+        plt.savefig("models/reward_plot.png")
     
-    model = PPO.load("models/ppo_air_traffic_best")
+
+    model = PPO.load("models/ppo_air_traffic")
     test_env = AirTrafficEnv(render_mode="rgb_array", max_planes=1, enable_acceleration=False, enable_wind=False)
     frames = []
     observations, infos = test_env.reset()
