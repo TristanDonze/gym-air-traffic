@@ -101,13 +101,11 @@ class AirTrafficEnv(ParallelEnv):
         truncations = {agent: self.steps >= 1000 for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
         
-        # Basic time penalty for active planes to encourage efficiency
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
                 rewards[agent] -= 0.05
 
-        # Update wind vector with some random fluctuation
         if self.enable_wind and self.max_wind_speed > 0:
             noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
             self.wind_vector += noise
@@ -116,7 +114,6 @@ class AirTrafficEnv(ParallelEnv):
             if current_wind_speed > self.max_wind_speed:
                 self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
         
-        # Update plane positions and calculate rewards
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
@@ -135,11 +132,13 @@ class AirTrafficEnv(ParallelEnv):
                     
                     rewards[agent] += (dist_before - dist_after) * 0.1
                     
+                    ideal_heading = math.atan2(target_zone.y - plane.y, target_zone.x - plane.x)
+                    aim_diff = plane.heading - ideal_heading
+                    rewards[agent] += math.cos(aim_diff) * 0.05
+                    
                     if target_zone.type != "helipad" and dist_after < 400:
-                        angle_diff = abs(plane.heading - target_zone.angle)
-                        angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
-                        if abs(angle_diff) < 0.5:
-                            rewards[agent] += 0.5
+                        runway_diff = plane.heading - target_zone.angle
+                        rewards[agent] += math.cos(runway_diff) * 0.05
 
         self._check_collisions(rewards, terminations)
         self._check_landings(rewards, terminations)
