@@ -177,16 +177,33 @@ class AirTrafficEnv(ParallelEnv):
         if self.total_spawned < self.max_planes and random.random() < self.spawn_rate:
             spawn_successful = False
             
+            rand_type = random.random()
+            if rand_type < 0.45:
+                p_type, dest_id, speed = "jet_red", 0, 2.5
+            elif rand_type < 0.9:
+                p_type, dest_id, speed = "jet_blue", 1, 2.5
+            else:
+                if not self.helicopter_spawned:
+                    p_type, dest_id, speed = "helicopter", 2, 1.5
+                    self.helicopter_spawned = True
+                else:
+                    p_type, dest_id, speed = random.choice([("jet_red", 0, 2.5), ("jet_blue", 1, 2.5)])
+
+            target_zone = next((z for z in self.zones if z.id == dest_id), None)
+            tx = target_zone.x if target_zone else self.width / 2
+            ty = target_zone.y if target_zone else self.height / 2
+            
             for _ in range(10):
                 side = random.choice(["top", "bottom", "left", "right"])
+                
                 if side == "top":
-                    x, y, h = random.uniform(0, self.width), 0, math.pi/2
+                    x, y = random.uniform(50, self.width - 50), 0
                 elif side == "bottom":
-                    x, y, h = random.uniform(0, self.width), self.height, -math.pi/2
+                    x, y = random.uniform(50, self.width - 50), self.height
                 elif side == "left":
-                    x, y, h = 0, random.uniform(0, self.height), 0
+                    x, y = 0, random.uniform(50, self.height - 50)
                 else:
-                    x, y, h = self.width, random.uniform(0, self.height), math.pi
+                    x, y = self.width, random.uniform(50, self.height - 50)
 
                 too_close = False
                 for p in self.planes_dict.values():
@@ -197,22 +214,14 @@ class AirTrafficEnv(ParallelEnv):
                             break
                 
                 if not too_close:
+                    ideal_h = math.atan2(ty - y, tx - x)
+                    noise = random.uniform(-0.5, 0.5)
+                    h = (ideal_h + noise + math.pi) % (2 * math.pi) - math.pi
+                    
                     spawn_successful = True
                     break
 
             if spawn_successful:
-                rand_type = random.random()
-                if rand_type < 0.45:
-                    p_type, dest_id, speed = "jet_red", 0, 2.5
-                elif rand_type < 0.9:
-                    p_type, dest_id, speed = "jet_blue", 1, 2.5
-                else:
-                    if not self.helicopter_spawned:
-                        p_type, dest_id, speed = "helicopter", 2, 1.5
-                        self.helicopter_spawned = True
-                    else:
-                        p_type, dest_id, speed = random.choice([("jet_red", 0, 2.5), ("jet_blue", 1, 2.5)])
-                
                 new_agent_id = self.possible_agents[self.total_spawned]
                 new_plane = Aircraft(x, y, speed=speed, heading=h, plane_type=p_type, destination_id=dest_id)
                 self.planes_dict[new_agent_id] = new_plane
