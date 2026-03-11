@@ -175,7 +175,7 @@ class AirTrafficEnv(ParallelEnv):
                 for p in self.planes_dict.values():
                     if p is not None and p.active:
                         dist = math.sqrt((p.x - x)**2 + (p.y - y)**2)
-                        if dist < 60:
+                        if dist < 100:
                             too_close = True
                             break
                 
