@@ -42,7 +42,7 @@ class AirTrafficEnv(ParallelEnv):
         self.agents = self.possible_agents[:]
         self.planes_dict = {agent: None for agent in self.possible_agents}
 
-        base_features = 12 if self.enable_wind else 10
+        base_features = 14 if self.enable_wind else 12
         self.obs_dim = base_features + ((self.max_planes - 1) * 6)
         self.action_dim = 2 if self.enable_acceleration else 1
 
@@ -84,8 +84,9 @@ class AirTrafficEnv(ParallelEnv):
                 strength * math.sin(angle)
             ])
         
-        self._spawn_planes()
-        
+        while self.total_spawned < self.max_planes:
+            self._spawn_planes()
+            
         observations = {agent: self._get_single_obs(agent) for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
         
@@ -109,7 +110,6 @@ class AirTrafficEnv(ParallelEnv):
         if self.enable_wind and self.max_wind_speed > 0:
             noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
             self.wind_vector += noise
-            
             current_wind_speed = np.linalg.norm(self.wind_vector)
             if current_wind_speed > self.max_wind_speed:
                 self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
@@ -144,7 +144,10 @@ class AirTrafficEnv(ParallelEnv):
         self._check_landings(rewards, terminations)
         self._check_out_of_bounds(rewards, terminations)
 
-        self._spawn_planes()
+        for agent in self.agents:
+            plane = self.planes_dict[agent]
+            if plane is None or not plane.active:
+                terminations[agent] = True
 
         observations = {agent: self._get_single_obs(agent) for agent in self.agents}
 
@@ -173,58 +176,56 @@ class AirTrafficEnv(ParallelEnv):
                 pass
 
     def _spawn_planes(self):
-        if self.total_spawned < self.max_planes and random.random() < self.spawn_rate:
-            spawn_successful = False
-            
-            rand_type = random.random()
-            if rand_type < 0.45:
-                p_type, dest_id, speed = "jet_red", 0, 2.5
-            elif rand_type < 0.9:
-                p_type, dest_id, speed = "jet_blue", 1, 2.5
+        spawn_successful = False
+        
+        rand_type = random.random()
+        if rand_type < 0.45:
+            p_type, dest_id, speed = "jet_red", 0, 2.5
+        elif rand_type < 0.9:
+            p_type, dest_id, speed = "jet_blue", 1, 2.5
+        else:
+            if not self.helicopter_spawned:
+                p_type, dest_id, speed = "helicopter", 2, 1.5
+                self.helicopter_spawned = True
             else:
-                if not self.helicopter_spawned:
-                    p_type, dest_id, speed = "helicopter", 2, 1.5
-                    self.helicopter_spawned = True
-                else:
-                    p_type, dest_id, speed = random.choice([("jet_red", 0, 2.5), ("jet_blue", 1, 2.5)])
+                p_type, dest_id, speed = random.choice([("jet_red", 0, 2.5), ("jet_blue", 1, 2.5)])
 
-            target_zone = next((z for z in self.zones if z.id == dest_id), None)
-            tx = target_zone.x if target_zone else self.width / 2
-            ty = target_zone.y if target_zone else self.height / 2
+        target_zone = next((z for z in self.zones if z.id == dest_id), None)
+        tx = target_zone.x if target_zone else self.width / 2
+        ty = target_zone.y if target_zone else self.height / 2
+        
+        for _ in range(10):
+            side = random.choice(["top", "bottom", "left", "right"])
             
-            for _ in range(10):
-                side = random.choice(["top", "bottom", "left", "right"])
-                
-                if side == "top":
-                    x, y = random.uniform(50, self.width - 50), 0
-                elif side == "bottom":
-                    x, y = random.uniform(50, self.width - 50), self.height
-                elif side == "left":
-                    x, y = 0, random.uniform(50, self.height - 50)
-                else:
-                    x, y = self.width, random.uniform(50, self.height - 50)
+            if side == "top":
+                x, y = random.uniform(50, self.width - 50), 0
+            elif side == "bottom":
+                x, y = random.uniform(50, self.width - 50), self.height
+            elif side == "left":
+                x, y = 0, random.uniform(50, self.height - 50)
+            else:
+                x, y = self.width, random.uniform(50, self.height - 50)
 
-                too_close = False
-                for p in self.planes_dict.values():
-                    if p is not None and p.active:
-                        dist = math.sqrt((p.x - x)**2 + (p.y - y)**2)
-                        if dist < 100:
-                            too_close = True
-                            break
-                
-                if not too_close:
-                    ideal_h = math.atan2(ty - y, tx - x)
-                    noise = random.uniform(-0.5, 0.5)
-                    h = (ideal_h + noise + math.pi) % (2 * math.pi) - math.pi
-                    
-                    spawn_successful = True
-                    break
+            too_close = False
+            for p in self.planes_dict.values():
+                if p is not None and p.active:
+                    dist = math.sqrt((p.x - x)**2 + (p.y - y)**2)
+                    if dist < 100:
+                        too_close = True
+                        break
+            
+            if not too_close:
+                ideal_h = math.atan2(ty - y, tx - x)
+                noise = random.uniform(-0.5, 0.5)
+                h = (ideal_h + noise + math.pi) % (2 * math.pi) - math.pi
+                spawn_successful = True
+                break
 
-            if spawn_successful:
-                new_agent_id = self.possible_agents[self.total_spawned]
-                new_plane = Aircraft(x, y, speed=speed, heading=h, plane_type=p_type, destination_id=dest_id)
-                self.planes_dict[new_agent_id] = new_plane
-                self.total_spawned += 1
+        if spawn_successful:
+            new_agent_id = self.possible_agents[self.total_spawned]
+            new_plane = Aircraft(x, y, speed=speed, heading=h, plane_type=p_type, destination_id=dest_id)
+            self.planes_dict[new_agent_id] = new_plane
+            self.total_spawned += 1
 
     def _check_collisions(self, rewards, terminations):
         n = len(self.agents)
@@ -250,7 +251,7 @@ class AirTrafficEnv(ParallelEnv):
                 for zone in self.zones:
                     if zone.id == plane.destination_id and zone.validate_landing(plane):
                         if not self.enable_acceleration or plane.speed <= plane.landing_speed_limit:
-                            rewards[agent] += 150.0
+                            rewards[agent] += 500.0
                         else:
                             rewards[agent] -= 50.0
                         plane.active = False
@@ -279,19 +280,24 @@ class AirTrafficEnv(ParallelEnv):
         dx_target = (tx - plane.x) / self.width
         dy_target = (ty - plane.y) / self.height
         
+        ideal_heading = math.atan2(ty - plane.y, tx - plane.x)
+        relative_heading = plane.heading - ideal_heading
+        
         t_val = 0.0 if plane.type == "jet_red" else 0.5 if plane.type == "jet_blue" else 1.0
 
         obs_list = [
-            plane.x / self.width, 
-            plane.y / self.height,
-            (plane.speed - plane.min_speed) / (plane.max_speed - plane.min_speed),
-            math.cos(plane.heading), 
-            math.sin(plane.heading),
-            dx_target, 
-            dy_target,
-            math.cos(t_angle),
-            math.sin(t_angle),
-            t_val
+            plane.x / self.width, # coordinate x normalized
+            plane.y / self.height, # coordinate y normalized
+            (plane.speed - plane.min_speed) / (plane.max_speed - plane.min_speed), # speed normalized
+            math.cos(plane.heading), # cosine of heading
+            math.sin(plane.heading), # sine of heading
+            math.cos(relative_heading), # cosine of relative heading to target
+            math.sin(relative_heading),# sine of relative heading to target
+            dx_target, # x distance to target normalized
+            dy_target, # y distance to target normalized
+            math.cos(t_angle), # cosine of target zone angle
+            math.sin(t_angle), # sine of target zone angle
+            t_val # type of plane as a value between 0 and 1
         ]
 
         if self.enable_wind:
@@ -309,17 +315,18 @@ class AirTrafficEnv(ParallelEnv):
             
             other_plane = self.planes_dict[other_agent]
             if other_plane is not None and other_plane.active:
-                dx = (other_plane.x - plane.x) / self.width
-                dy = (other_plane.y - plane.y) / self.height
-                dv = (other_plane.speed - plane.speed) / (plane.max_speed - plane.min_speed)
-                dhead = other_plane.heading - plane.heading
+                dx = (other_plane.x - plane.x) / self.width # x distance to other plane normalized
+                dy = (other_plane.y - plane.y) / self.height # y distance to other plane normalized
+                dv = (other_plane.speed - plane.speed) / (plane.max_speed - plane.min_speed) # relative speed normalized
+                dhead = other_plane.heading - plane.heading # relative heading
                 
                 obs_list.extend([dx, 
                                  dy, 
                                  dv, 
                                  math.cos(dhead), 
                                  math.sin(dhead), 
-                                 1.0])
+                                 1.0 # indicator that this slot contains an active plane
+                                 ])
             else:
                 obs_list.extend([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0])
 
