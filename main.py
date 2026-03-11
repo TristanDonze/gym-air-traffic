@@ -3,7 +3,7 @@ import numpy as np
 from gym_air_traffic.envs.air_traffic_env import AirTrafficEnv
 
 def main():
-    env = AirTrafficEnv(render_mode="rgb_array", max_planes=3, enable_acceleration=False, enable_wind=False)
+    env = AirTrafficEnv(render_mode="rgb_array", max_planes=10, enable_acceleration=False, enable_wind=False)
     print(f"Observation dimensions: {env.obs_dim}, Action dimensions: {env.action_dim}")
     
     frames = []
