@@ -42,7 +42,7 @@ class AirTrafficEnv(ParallelEnv):
         self.agents = self.possible_agents[:]
         self.planes_dict = {agent: None for agent in self.possible_agents}
 
-        base_features = 10 if self.enable_wind else 8
+        base_features = 12 if self.enable_wind else 10
         self.obs_dim = base_features + ((self.max_planes - 1) * 6)
         self.action_dim = 2 if self.enable_acceleration else 1
 
@@ -262,6 +262,7 @@ class AirTrafficEnv(ParallelEnv):
 
         target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
         tx, ty = (target_zone.x, target_zone.y) if target_zone else (0.0, 0.0)
+        t_angle = target_zone.angle if target_zone else 0.0
         
         dx_target = (tx - plane.x) / self.width
         dy_target = (ty - plane.y) / self.height
@@ -275,7 +276,9 @@ class AirTrafficEnv(ParallelEnv):
             math.cos(plane.heading), 
             math.sin(plane.heading),
             dx_target, 
-            dy_target, 
+            dy_target,
+            math.cos(t_angle),
+            math.sin(t_angle),
             t_val
         ]
 
@@ -286,8 +289,7 @@ class AirTrafficEnv(ParallelEnv):
             else:
                 wx_norm = 0.0
                 wy_norm = 0.0
-            obs_list.extend([wx_norm, 
-                             wy_norm])
+            obs_list.extend([wx_norm, wy_norm])
 
         for other_agent in self.possible_agents:
             if other_agent == agent:
