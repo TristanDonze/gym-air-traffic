@@ -100,19 +100,23 @@ The remaining values represent the relative states of the other potential aircra
 
 The environment uses a combination of sparse terminal rewards and dense shaping rewards. Rewards are distributed individually to each agent.
 
+### Rewards
+
+The environment uses a combination of sparse terminal rewards and dense shaping rewards. Rewards are distributed individually to each agent.
+
 **Dense Rewards (per step):**
 
-* Time Penalty: `-0.05`. Applied to every active aircraft at every step to encourage fast task completion and prevent infinite hovering.
+* Time Penalty: `-0.15`. Applied to every active aircraft at every step to encourage fast task completion and prevent infinite hovering.
 * Distance Reduction: `+0.1 * (distance_before - distance_after)`. Rewards the agent for moving closer to its specific landing zone.
-* Target Aiming: `+0.05 * cos(heading - ideal_heading)`. Provides a continuous gradient rewarding the agent for pointing directly toward its destination.
-* Runway Alignment: `+0.05 * cos(heading - runway_angle)`. Applied only when the agent is within 400 pixels of a runway (excludes helipads) to encourage a straight final approach axis.
+* Approach Funnel Alignment: `+0.2 * alignment_bonus`. Applied when the agent is generally in front of the runway (dot product > 0.9). Rewards the agent linearly for minimizing its lateral distance to the runway's extended center line.
+* Runway Heading Alignment: `+0.1 * heading_bonus`. Applied in the approach funnel, linearly rewarding the agent for matching the exact angle of the runway.
 
 **Terminal Rewards:**
 
-* Landing Success: `+150.0`. The agent reached its zone with the correct alignment and speed below the landing limit.
+* Landing Success: `+500.0`. The agent reached its zone with strict alignment (within 20 pixels, < 0.15 radians off-axis) and speed below the landing limit.
 * Landing Speed Penalty: `-50.0`. The agent reached the correct zone and alignment, but was flying too fast (only applies if acceleration is enabled).
 * Out of Bounds: `-200.0`. The agent left the screen boundaries.
-* Collision: `-100.0`. The agent collided with another aircraft (distance < 30 pixels). Applies to both involved agents.
+* Collision: `-500.0`. The agent collided with another aircraft (distance < 30 pixels). Applies to both involved agents.
 
 ## Usage Example
 
