@@ -4,3 +4,4 @@ __pycache__/
 .vscode/
 videos/
 training_logs/
+models/
