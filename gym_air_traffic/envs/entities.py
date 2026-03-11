@@ -17,7 +17,7 @@ class Aircraft:
         
         self.landing_speed_limit = 2.5 
 
-        self.turn_rate = 0.05 if plane_type == "jet_red" or plane_type == "jet_blue" else 0.08
+        self.turn_rate = 0.15 if plane_type == "jet_red" or plane_type == "jet_blue" else 0.2
 
     def move(self, wind_vector):
         dx_plane = self.speed * math.cos(self.heading)
@@ -52,7 +52,7 @@ class LandingZone:
     def validate_landing(self, aircraft):
         dist = math.sqrt((self.x - aircraft.x)**2 + (self.y - aircraft.y)**2)
         
-        if dist > self.radius:
+        if dist > 100.0:
             return False
 
         if self.type != aircraft.type:
@@ -64,7 +64,7 @@ class LandingZone:
         angle_diff = abs(aircraft.heading - self.angle)
         angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
         
-        if abs(angle_diff) < 0.5: 
+        if abs(angle_diff) < 1.2: 
             return True
             
         return False
