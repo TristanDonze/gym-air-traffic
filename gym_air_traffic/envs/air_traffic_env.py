@@ -12,7 +12,7 @@ from gym_air_traffic.envs.renderer import Renderer
 class AirTrafficEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "air_traffic_v0"}
 
-    def __init__(self, render_mode=None, max_planes=10):
+    def __init__(self, render_mode=None, max_planes=10, enable_acceleration=True, enable_wind=True):
         super().__init__()
         self.width = 800
         self.height = 600
@@ -20,6 +20,9 @@ class AirTrafficEnv(ParallelEnv):
         self.renderer = Renderer(self.width, self.height)
         
         self.max_planes = max_planes
+        self.enable_acceleration = enable_acceleration
+        self.enable_wind = enable_wind
+        
         self.total_spawned = 0
         self.nb_active_agents = 0
         self.helicopter_spawned = False
@@ -32,14 +35,16 @@ class AirTrafficEnv(ParallelEnv):
         ]
 
         self.wind_vector = np.array([0.0, 0.0])
-        self.max_wind_speed = 0.001
+        self.max_wind_speed = 1.0
         self.wind_change_rate = 0.05
 
         self.possible_agents = [f"plane_{i}" for i in range(self.max_planes)]
         self.agents = self.possible_agents[:]
         self.planes_dict = {agent: None for agent in self.possible_agents}
 
-        self.obs_dim = 10 + ((self.max_planes - 1) * 6)
+        base_features = 10 if self.enable_wind else 8
+        self.obs_dim = base_features + ((self.max_planes - 1) * 6)
+        self.action_dim = 2 if self.enable_acceleration else 1
 
         self.observation_spaces = {
             agent: spaces.Box(low=-float("inf"), high=float("inf"), shape=(self.obs_dim,), dtype=np.float32) 
@@ -47,7 +52,7 @@ class AirTrafficEnv(ParallelEnv):
         }
 
         self.action_spaces = {
-            agent: spaces.Box(low=np.array([-1.0, -1.0], dtype=np.float32), high=np.array([1.0, 1.0], dtype=np.float32), dtype=np.float32) 
+            agent: spaces.Box(low=-1.0, high=1.0, shape=(self.action_dim,), dtype=np.float32) 
             for agent in self.possible_agents
         }
 
@@ -65,17 +70,19 @@ class AirTrafficEnv(ParallelEnv):
         self.steps = 0
         self.total_spawned = 0
         self.helicopter_spawned = False
+        self.wind_vector = np.array([0.0, 0.0])
         
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
             
-        angle = random.uniform(0, 2 * math.pi)
-        strength = random.uniform(0, self.max_wind_speed)
-        self.wind_vector = np.array([
-            strength * math.cos(angle),
-            strength * math.sin(angle)
-        ])
+        if self.enable_wind and self.max_wind_speed > 0:
+            angle = random.uniform(0, 2 * math.pi)
+            strength = random.uniform(0, self.max_wind_speed)
+            self.wind_vector = np.array([
+                strength * math.cos(angle),
+                strength * math.sin(angle)
+            ])
         
         self._spawn_planes()
         
@@ -93,21 +100,31 @@ class AirTrafficEnv(ParallelEnv):
         terminations = {agent: False for agent in self.agents}
         truncations = {agent: self.steps >= 1000 for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
-
-        noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
-        self.wind_vector += noise
         
-        current_wind_speed = np.linalg.norm(self.wind_vector)
-        if current_wind_speed > self.max_wind_speed:
-            self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
+        # Basic time penalty for active planes to encourage efficiency
+        for agent in self.agents:
+            plane = self.planes_dict[agent]
+            if plane is not None and plane.active:
+                rewards[agent] -= 0.05
 
+        # Update wind vector with some random fluctuation
+        if self.enable_wind and self.max_wind_speed > 0:
+            noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
+            self.wind_vector += noise
+            
+            current_wind_speed = np.linalg.norm(self.wind_vector)
+            if current_wind_speed > self.max_wind_speed:
+                self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
+        
+        # Update plane positions and calculate rewards
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
                 if agent in actions:
                     command = actions[agent]
                     plane.change_heading(command[0])
-                    plane.change_speed(command[1])
+                    if self.enable_acceleration:
+                        plane.change_speed(command[1])
                     plane.move(self.wind_vector)
                 
                 target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
@@ -222,7 +239,7 @@ class AirTrafficEnv(ParallelEnv):
             if plane is not None and plane.active:
                 for zone in self.zones:
                     if zone.id == plane.destination_id and zone.validate_landing(plane):
-                        if plane.speed <= plane.landing_speed_limit:
+                        if not self.enable_acceleration or plane.speed <= plane.landing_speed_limit:
                             rewards[agent] += 150.0
                         else:
                             rewards[agent] -= 50.0
@@ -239,8 +256,6 @@ class AirTrafficEnv(ParallelEnv):
 
     def _get_single_obs(self, agent):
         plane = self.planes_dict[agent]
-        wx_norm = self.wind_vector[0] / self.max_wind_speed
-        wy_norm = self.wind_vector[1] / self.max_wind_speed
         
         if plane is None or not plane.active:
             return np.full(self.obs_dim, -1.0, dtype=np.float32)
@@ -254,11 +269,25 @@ class AirTrafficEnv(ParallelEnv):
         t_val = 0.0 if plane.type == "jet_red" else 0.5 if plane.type == "jet_blue" else 1.0
 
         obs_list = [
-            plane.x / self.width, plane.y / self.height,
+            plane.x / self.width, 
+            plane.y / self.height,
             (plane.speed - plane.min_speed) / (plane.max_speed - plane.min_speed),
-            math.cos(plane.heading), math.sin(plane.heading),
-            dx_target, dy_target, t_val, wx_norm, wy_norm
+            math.cos(plane.heading), 
+            math.sin(plane.heading),
+            dx_target, 
+            dy_target, 
+            t_val
         ]
+
+        if self.enable_wind:
+            if self.max_wind_speed > 0:
+                wx_norm = self.wind_vector[0] / self.max_wind_speed
+                wy_norm = self.wind_vector[1] / self.max_wind_speed
+            else:
+                wx_norm = 0.0
+                wy_norm = 0.0
+            obs_list.extend([wx_norm, 
+                             wy_norm])
 
         for other_agent in self.possible_agents:
             if other_agent == agent:
@@ -271,20 +300,26 @@ class AirTrafficEnv(ParallelEnv):
                 dv = (other_plane.speed - plane.speed) / (plane.max_speed - plane.min_speed)
                 dhead = other_plane.heading - plane.heading
                 
-                obs_list.extend([dx, dy, dv, math.cos(dhead), math.sin(dhead), 1.0])
+                obs_list.extend([dx, 
+                                 dy, 
+                                 dv, 
+                                 math.cos(dhead), 
+                                 math.sin(dhead), 
+                                 1.0])
             else:
                 obs_list.extend([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0])
 
         return np.array(obs_list, dtype=np.float32)
 
 if __name__ == "__main__":
-    env = AirTrafficEnv(max_planes=6)
+    env = AirTrafficEnv(max_planes=4, enable_acceleration=False, enable_wind=False)
     observations, infos = env.reset()
     
-    print("Environment reset. Testing spawn logic and active agents count...")
-    print(f"Configured max_planes: {env.max_planes}")
+    print("Testing environment without wind and without acceleration.")
+    print(f"Action dimension: {env.action_dim}")
+    print(f"Observation dimension: {env.obs_dim}")
     
-    for i in range(300):
+    for i in range(100):
         actions = {}
         for agent in env.agents:
             if env.planes_dict[agent] is not None and env.planes_dict[agent].active:
@@ -292,10 +327,8 @@ if __name__ == "__main__":
         
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
-        if i % 50 == 0:
-            print(f"Step {i} - Total spawned: {env.total_spawned} | Active agents currently: {env.nb_active_agents}")
-            heli_status = "Spawned" if env.helicopter_spawned else "Not Spawned"
-            print(f"Helicopter status: {heli_status}")
+        if i % 25 == 0:
+            print(f"Step {i} | Active: {env.nb_active_agents} | Total: {env.total_spawned}")
 
     env.close()
-    print("Test completed.")
+    print("Simulation completed successfully.")
