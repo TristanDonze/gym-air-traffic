@@ -17,7 +17,7 @@ class Aircraft:
         
         self.landing_speed_limit = 2.5 
 
-        self.turn_rate = 0.15 if plane_type == "jet_red" or plane_type == "jet_blue" else 0.2
+        self.turn_rate = 0.05 if plane_type == "jet_red" or plane_type == "jet_blue" else 0.08
 
     def move(self, wind_vector):
         dx_plane = self.speed * math.cos(self.heading)
@@ -52,19 +52,35 @@ class LandingZone:
     def validate_landing(self, aircraft):
         dist = math.sqrt((self.x - aircraft.x)**2 + (self.y - aircraft.y)**2)
         
-        if dist > 100.0:
+        if dist > 20.0:
             return False
 
-        if self.type != aircraft.type:
+        is_match = False
+        if self.type == "runway_red" and aircraft.type == "jet_red":
+            is_match = True
+        elif self.type == "runway_blue" and aircraft.type == "jet_blue":
+            is_match = True
+        elif self.type == "helipad" and aircraft.type == "helicopter":
+            is_match = True
+
+        if not is_match:
             return False
 
         if self.type == "helipad":
             return True
 
-        angle_diff = abs(aircraft.heading - self.angle)
-        angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+        heading_diff = abs(aircraft.heading - self.angle)
+        heading_diff = (heading_diff + math.pi) % (2 * math.pi) - math.pi
         
-        if abs(angle_diff) < 1.2: 
-            return True
+        if abs(heading_diff) > 0.15: 
+            return False
             
-        return False
+        pos_angle = math.atan2(self.y - aircraft.y, self.x - aircraft.x)
+        pos_diff = abs(pos_angle - self.angle)
+        pos_diff = (pos_diff + math.pi) % (2 * math.pi) - math.pi
+        
+        if abs(pos_diff) > 0.15:
+            return False
+
+        # print(f"Landing successful! Debugging every variables : dist={dist:.2f}, is_match={is_match}, heading_diff={heading_diff:.2f}, pos_angle={pos_angle:.2f}, self.angle={self.angle}, pos_diff={pos_diff:.2f}")
+        return True
