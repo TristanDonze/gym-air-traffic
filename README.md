@@ -1,32 +1,31 @@
 # Gym Air Traffic
 
-A custom Reinforcement Learning environment compatible with [Farama Gymnasium](https://gymnasium.farama.org/).
+A custom Multi-Agent Reinforcement Learning environment compatible with the PettingZoo Parallel API.
 
-**Gym Air Traffic** is a 2D simulation where an agent must guide multiple aircraft (Jets and Helicopters) to their specific landing zones while avoiding collisions, managing speed, and compensating for dynamic wind conditions.
+Gym Air Traffic is a 2D simulation where an agent must guide multiple aircraft (Jets and Helicopters) to their specific landing zones while avoiding collisions, managing speed, and compensating for dynamic wind conditions.
 
 ## Features
 
-* **Multi-Agent Control:** Control up to 10 aircraft simultaneously.
-* **Diverse Traffic:**
-* 🔴 **Red Jets:** Must land on the Red Runway (East-facing).
-* 🔵 **Blue Jets:** Must land on the Blue Runway (East-facing).
-* 🚁 **Helicopters:** Must land on the Helipad (Omnidirectional).
+* Multi-Agent Control: Built on the PettingZoo ParallelEnv.
+* Configurable Difficulty: Customize the maximum number of planes, and toggle acceleration or wind dynamics to scale the complexity of the task.
+* Diverse Traffic:
+    * Red Jets: Must land on the Red Runway (East-facing).
+    * Blue Jets: Must land on the Blue Runway (East-facing).
+    * Helicopters: Must land on the Helipad (Omnidirectional). Limited to a maximum of 1 per episode.
 
 
-* **Physics-Based Movement:** Aircraft have inertia, turning rates, and acceleration/deceleration mechanics.
-* **Dynamic Environment:** Randomized spawn points and changing wind vectors that affect flight trajectories.
-* **Continuous Action Space:** Precise control over heading and throttle.
+* Physics-Based Movement: Aircraft have inertia, turning rates, and optional acceleration and wind drift mechanics.
+* One-Time Spawning: Aircraft are spawned progressively (checking for safe distances). Once an aircraft lands, crashes, or flies out of bounds, it is permanently disabled for the remainder of the episode.
+* Ego-Centric Observations: Each agent observes the environment from its own perspective. Inactive or dead agents are masked to maintain tensor stability.
 
 ## Installation
 
 ### Prerequisites
 
 * Python 3.8+
-* `gymnasium`, `numpy`, `pygame`, `imageio`
+* gymnasium, pettingzoo, numpy, pygame, imageio
 
 ### Install via pip (Local)
-
-To install the environment in editable mode (useful for development):
 
 ```bash
 git clone https://github.com/TristanDonze/gym-air-traffic.git
@@ -37,110 +36,138 @@ pip install -e .
 
 ### Install directly from GitHub
 
-To install it directly into your python environment without cloning manually:
-
 ```bash
 pip install git+https://github.com/TristanDonze/gym-air-traffic.git
 
 ```
 
-> **Note:** To save videos (MP4), ensure you have `ffmpeg` installed on your system or install imageio with ffmpeg:
-> `pip install "imageio[ffmpeg]"`
-
 ## Environment Details
 
 ### Action Space
 
-The action space is **Continuous**.
-`Box(-pi, pi, (Max_Planes, 2), float32)`
+The action space is continuous and defined per agent. The dimension depends on the `enable_acceleration` parameter in the environment constructor.
 
-The agent provides a matrix of shape `(N, 2)` where `N` is the maximum number of planes (default: 10). For each aircraft slot $i$:
-
+If `enable_acceleration=True` (Shape: `(2,)`):
 | Index | Name | Range | Description |
 | --- | --- | --- | --- |
-| 0 | **Heading** | $[-\pi, \pi]$ | The target angle the aircraft should turn towards. |
-| 1 | **Throttle** | $[-1, 1]$ | Acceleration command. $-1$ is max braking, $1$ is max thrust. |
+| 0 | Steering | [-1.0, 1.0] | Relative turn command. Multiplied by the aircraft's internal turn rate. |
+| 1 | Throttle | [-1.0, 1.0] | Relative acceleration command. Multiplied by the aircraft's internal acceleration rate. |
+
+If `enable_acceleration=False` (Shape: `(1,)`):
+Only the Steering command (Index 0) is available. The aircraft will maintain its initial spawn speed.
 
 ### Observation Space
-The observation space is a matrix of shape `(N, 11)`.
-`Box(-inf, inf, (Max_Planes, 11), float32)`
 
-Each row represents the state of a potential aircraft slot:
+The observation space is ego-centric. Its size is calculated dynamically based on the `max_planes` and `enable_wind` parameters: `base_features + ((max_planes - 1) * 6)`.
+
+* `base_features` is 12 if `enable_wind=True`, and 10 if `enable_wind=False`.
+* If a plane slot is inactive (has not spawned yet, or has already terminated), its entire observation vector is filled with `-1.0`.
+
+**Part 1: Ego State (Indices 0 to 9 or 11)**
+Represents the current agent's state and target:
 
 | Index | Feature | Description |
-| :--- | :--- | :--- |
-| 0 | `x` | X position (normalized by screen width). |
-| 1 | `y` | Y position (normalized by screen height). |
-| 2 | `speed` | Current speed (normalized). |
-| 3 | `cos(heading)` | Cosine of the current heading angle. |
-| 4 | `sin(heading)` | Sine of the current heading angle. |
-| 5 | `target_x` | X coordinate of the assigned landing zone (normalized). |
-| 6 | `target_y` | Y coordinate of the assigned landing zone (normalized). |
-| 7 | `type_id` | `0.0` (Red Jet), `0.5` (Blue Jet), `1.0` (Helicopter). |
-| 8 | `wind_x` | X component of the global wind vector (normalized). |
-| 9 | `wind_y` | Y component of the global wind vector (normalized). |
-| 10 | `is_active` | `1.0` if the slot contains a plane, `0.0` otherwise. |
+| --- | --- | --- |
+| 0 | x | X position (normalized by screen width). |
+| 1 | y | Y position (normalized by screen height). |
+| 2 | speed | Current speed (normalized between min and max speed). |
+| 3 | cos(heading) | Cosine of the current heading angle. |
+| 4 | sin(heading) | Sine of the current heading angle. |
+| 5 | dx_target | Relative X distance to the landing zone (normalized). |
+| 6 | dy_target | Relative Y distance to the landing zone (normalized). |
+| 7 | cos(target_angle) | Cosine of the target landing zone angle. |
+| 8 | sin(target_angle) | Sine of the target landing zone angle. |
+| 9 | type_id | 0.0 (Red Jet), 0.5 (Blue Jet), 1.0 (Helicopter). |
+| 10 | wind_x | Optional: X component of the global wind vector (normalized). |
+| 11 | wind_y | Optional: Y component of the global wind vector (normalized). |
+
+**Part 2: Radar State**
+The remaining values represent the relative states of the other potential aircraft in the environment. Each other aircraft occupies a block of 6 values:
+
+| Offset | Feature | Description |
+| --- | --- | --- |
+| +0 | dx | Relative X distance to the other plane (normalized). |
+| +1 | dy | Relative Y distance to the other plane (normalized). |
+| +2 | dv | Relative speed difference (normalized). |
+| +3 | cos(dhead) | Cosine of the relative heading difference. |
+| +4 | sin(dhead) | Sine of the relative heading difference. |
+| +5 | is_active | 1.0 if the slot contains an active plane, -1.0 if inactive. |
 
 ### Rewards
 
-The goal is to maximize the score by landing planes quickly and safely.
+The environment uses a combination of sparse terminal rewards and dense shaping rewards. Rewards are distributed individually to each agent.
 
-* **Landing Success:** `+150` (Correct zone, correct alignment, speed < limit).
-* **Crash (Mid-air):** `-100` (Collision between two aircraft).
-* **Crash (Landing):** `-50` (Landing speed too high or bad alignment).
-* **Out of Bounds:** `-50` (Leaving the screen area).
-* **Time Penalty:** `-1.0` per step (Encourages efficiency).
+**Dense Rewards (per step):**
+
+* Time Penalty: `-0.05`. Applied to every active aircraft at every step to encourage fast task completion.
+* Distance Reduction: `+0.1 * (distance_before - distance_after)`. Rewards the agent for moving closer to its specific landing zone.
+* Alignment Bonus: `+0.5`. Awarded if the agent is within 400 pixels of a runway and its heading is aligned with the runway's angle (angle difference < 0.5 radians). Does not apply to helipads.
+
+**Terminal Rewards:**
+
+* Landing Success: `+150.0`. The agent reached its zone with the correct alignment and speed below the landing limit.
+* Landing Speed Penalty: `-50.0`. The agent reached the correct zone and alignment, but was flying too fast (only applies if acceleration is enabled).
+* Out of Bounds: `-200.0`. The agent left the screen boundaries.
+* Collision: `-100.0`. The agent collided with another aircraft (distance < 30 pixels). Applies to both involved agents.
 
 ## Usage Example
 
-Here is a basic script to run the environment with random actions and save a video of the episode.
-
 ```python
-import gymnasium as gym
-import gym_air_traffic
-import numpy as np
 import os
+import numpy as np
+from gym_air_traffic.envs.air_traffic_env import AirTrafficEnv
 
 def main():
-    # Create the environment with rgb_array mode to capture frames
-    env = gym.make("AirTraffic-v0", render_mode="rgb_array")
+    env = AirTrafficEnv(render_mode="rgb_array", max_planes=3, enable_acceleration=False, enable_wind=False)
+    print(f"Observation dimensions: {env.obs_dim}, Action dimensions: {env.action_dim}")
     
     frames = []
-    observation, info = env.reset()
+    observations, infos = env.reset()
+    i = 0
+    actual_return = 0.0
+    
     print("Environment reset. Starting simulation...")
 
+    actived = {f"plane_{idx}": False for idx in range(env.max_planes)}
+
     try:
-        while True:
-            # Sample random actions
-            action = env.action_space.sample()
+        while env.steps < 1000:
+            actions = {agent: env.action_space(agent).sample() for agent in env.agents}
             
-            # Step the environment
-            observation, reward, terminated, truncated, info = env.step(action)
+            observations, rewards, terminations, truncations, infos = env.step(actions)
             
-            # Render the current frame
+            step_reward = sum(rewards.values()) if rewards else 0.0
+            actual_return += step_reward
+            
             frame = env.render()
             if frame is not None:
                 frames.append(frame)
 
-            # Print reward for debugging
-            # print(reward)
-
-            if terminated or truncated:
-                print("Episode finished.")
-                break
+            # if i % 100 == 0:
+            #     print(f"Step {i}, Return: {actual_return:.2f}, Active agents: {len(env.nb_active_agents)}")
+            #     for obs_id, obs in observations.items():
+            #         print(f"  Agent {obs_id}: Shape {obs.shape}, Sample values: {obs.flatten()[:5]}")
+            
+            for obs_id, obs in observations.items():
+                if not actived[obs_id] and obs.flatten()[0] != -1.0:
+                    print(f"Agent has just become active at step {i}:\n{obs_id}: Shape {obs.shape}, Sample values: {obs.flatten()[:5]}")
+                    actived[obs_id] = True
+            
+            for obs_id, obs in observations.items():
+                if actived[obs_id] and obs.flatten()[0] == -1.0:
+                    print(f"{obs_id} has just become inactive at step {i}:\n: Shape {obs.shape}, Sample values: {obs.flatten()[:5]}")
+                    actived[obs_id] = False
+            i += 1
+            
+        print("Episode finished.")
 
     except KeyboardInterrupt:
         print("Simulation stopped by user.")
     
     print(f"End of simulation. Captured {len(frames)} frames.")
-    
-    # Save the episode as an MP4 video
-    # Note: Requires 'imageio[ffmpeg]' installed
-    env.unwrapped.save_video("videos", frames, filename="simulation.mp4", fps=30)
-    
+    env.save_video("videos", frames, filename="simulation.mp4", fps=30)
     env.close()
 
 if __name__ == "__main__":
     main()
-
 ```
