@@ -99,9 +99,10 @@ The environment uses a combination of sparse terminal rewards and dense shaping 
 
 **Dense Rewards (per step):**
 
-* Time Penalty: `-0.05`. Applied to every active aircraft at every step to encourage fast task completion.
+* Time Penalty: `-0.05`. Applied to every active aircraft at every step to encourage fast task completion and prevent infinite hovering.
 * Distance Reduction: `+0.1 * (distance_before - distance_after)`. Rewards the agent for moving closer to its specific landing zone.
-* Alignment Bonus: `+0.5`. Awarded if the agent is within 400 pixels of a runway and its heading is aligned with the runway's angle (angle difference < 0.5 radians). Does not apply to helipads.
+* Target Aiming: `+0.05 * cos(heading - ideal_heading)`. Provides a continuous gradient rewarding the agent for pointing directly toward its destination.
+* Runway Alignment: `+0.05 * cos(heading - runway_angle)`. Applied only when the agent is within 400 pixels of a runway (excludes helipads) to encourage a straight final approach axis.
 
 **Terminal Rewards:**
 
