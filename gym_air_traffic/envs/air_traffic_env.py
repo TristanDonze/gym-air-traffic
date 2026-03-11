@@ -1,6 +1,7 @@
 import os
 import math
 import random
+import logging
 import imageio
 import numpy as np
 from gymnasium import spaces
@@ -8,6 +9,9 @@ from pettingzoo.utils.env import ParallelEnv
 
 from gym_air_traffic.envs.entities import Aircraft, LandingZone
 from gym_air_traffic.envs.renderer import Renderer
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("AirTrafficEnv")
 
 class AirTrafficEnv(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "air_traffic_v0"}
@@ -58,6 +62,8 @@ class AirTrafficEnv(ParallelEnv):
 
         self.steps = 0
 
+        logger.info(f"Environment initialized with max_planes={self.max_planes}, enable_acceleration={self.enable_acceleration}, enable_wind={self.enable_wind}. Observation dimension: {self.obs_dim}, Action dimension: {self.action_dim}.")
+
     def observation_space(self, agent):
         return self.observation_spaces[agent]
 
@@ -105,7 +111,7 @@ class AirTrafficEnv(ParallelEnv):
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
-                rewards[agent] -= 0.05
+                rewards[agent] -= 0.15 # This applies a flat time penalty every step to force the agent to land quickly instead of loitering.
 
         if self.enable_wind and self.max_wind_speed > 0:
             noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
@@ -130,15 +136,25 @@ class AirTrafficEnv(ParallelEnv):
                     dist_after = math.sqrt((target_zone.x - plane.x)**2 + (target_zone.y - plane.y)**2)
                     plane.last_dist = dist_after
                     
-                    rewards[agent] += (dist_before - dist_after) * 0.1
+                    rewards[agent] += (dist_before - dist_after) * 0.1 # This gives a positive reward if the distance to the target decreases, and a penalty if the distance increases.
                     
-                    ideal_heading = math.atan2(target_zone.y - plane.y, target_zone.x - plane.x)
-                    aim_diff = plane.heading - ideal_heading
-                    rewards[agent] += math.cos(aim_diff) * 0.05
-                    
-                    if target_zone.type != "helipad" and dist_after < 400:
-                        runway_diff = plane.heading - target_zone.angle
-                        rewards[agent] += math.cos(runway_diff) * 0.05
+                    if target_zone.type != "helipad":
+                        dx = plane.x - target_zone.x 
+                        dy = plane.y - target_zone.y
+                        
+                        target_dx = -math.cos(target_zone.angle)
+                        target_dy = -math.sin(target_zone.angle)
+                        
+                        dot_product = (dx * target_dx + dy * target_dy) / (dist_after + 1e-6)
+                        
+                        if dot_product > 0.9:
+                            lateral_dist = abs(dx * math.sin(target_zone.angle) - dy * math.cos(target_zone.angle))
+                            alignment_bonus = max(0.0, 1.0 - (lateral_dist / 40.0))
+                            rewards[agent] += alignment_bonus * 0.2
+                            
+                            runway_diff = plane.heading - target_zone.angle
+                            runway_diff = (runway_diff + math.pi) % (2 * math.pi) - math.pi
+                            rewards[agent] += max(0.0, 1.0 - (abs(runway_diff) / 0.5)) * 0.1
 
         self._check_collisions(rewards, terminations)
         self._check_landings(rewards, terminations)
@@ -237,12 +253,13 @@ class AirTrafficEnv(ParallelEnv):
                 if p1 is not None and p2 is not None and p1.active and p2.active:
                     dist = math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
                     if dist < 30: 
-                        rewards[a1] -= 100.0
-                        rewards[a2] -= 100.0
+                        rewards[a1] -= 500.0
+                        rewards[a2] -= 500.0
                         p1.active = False
                         p2.active = False
                         terminations[a1] = True
                         terminations[a2] = True
+                        logger.info(f"Collision detected between {a1} and {a2} at step {self.steps}. Distance: {dist:.2f}")
 
     def _check_landings(self, rewards, terminations):
         for agent in self.agents:
@@ -252,8 +269,10 @@ class AirTrafficEnv(ParallelEnv):
                     if zone.id == plane.destination_id and zone.validate_landing(plane):
                         if not self.enable_acceleration or plane.speed <= plane.landing_speed_limit:
                             rewards[agent] += 500.0
+                            logger.info(f"Successful landing for {agent} at step {self.steps}. Speed: {plane.speed:.2f}")
                         else:
                             rewards[agent] -= 50.0
+                            logger.info(f"Hard landing for {agent} at step {self.steps}. Speed: {plane.speed:.2f}")
                         plane.active = False
                         terminations[agent] = True
                         break
@@ -264,6 +283,7 @@ class AirTrafficEnv(ParallelEnv):
             if plane is not None and plane.active:
                 if plane.x < -50 or plane.x > self.width + 50 or plane.y < -50 or plane.y > self.height + 50:
                     rewards[agent] -= 200.0
+                    logger.info(f"Plane {agent} went out of bounds at step {self.steps}.")
                     plane.active = False
                     terminations[agent] = True
 
