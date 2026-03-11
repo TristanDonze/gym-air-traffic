@@ -162,10 +162,19 @@ class Renderer:
         img = self.images.get(key)
 
         if img:
-            angle_deg = -math.degrees(plane.heading)
+            angle_deg = -math.degrees(plane.heading) - 90
+            
             rotated_img = pygame.transform.rotate(img, angle_deg)
             rect = rotated_img.get_rect(center=(plane.x, plane.y))
             surface.blit(rotated_img, rect)
+            
+            pygame.draw.circle(surface, (255, 255, 255), (int(plane.x), int(plane.y)), 3)
+            
+            arrow_length = 20
+            end_x = plane.x + arrow_length * math.cos(plane.heading)
+            end_y = plane.y + arrow_length * math.sin(plane.heading)
+            pygame.draw.line(surface, (255, 255, 255), (plane.x, plane.y), (end_x, end_y), 2)
+            
         else:
             if plane.type == "jet_red":
                 color = (200, 50, 50)
