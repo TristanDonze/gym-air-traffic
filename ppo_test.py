@@ -55,7 +55,7 @@ def main():
 
     results_plotter.plot_results([log_dir], 500_000, results_plotter.X_TIMESTEPS, "PPO Training Reward",figsize=(20, 12))
     plt.savefig("models/reward_plot.png")
-    plt.show()
+    
     model = PPO.load("models/ppo_air_traffic_best")
     test_env = AirTrafficEnv(render_mode="rgb_array", max_planes=1, enable_acceleration=False, enable_wind=False)
     frames = []
