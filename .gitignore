@@ -5,3 +5,4 @@ __pycache__/
 videos/
 training_logs/
 models/
+gym_air_traffic.egg-info/
