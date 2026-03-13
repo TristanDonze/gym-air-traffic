@@ -30,7 +30,8 @@ class Renderer:
         path = os.path.join(self.assets_dir, filename)
         if os.path.exists(path):
             try:
-                img = pygame.image.load(path)
+                # NEW: Added .convert_alpha() to preserve transparency during rotation
+                img = pygame.image.load(path).convert_alpha() 
                 self.images[key] = img
             except Exception:
                 self.images[key] = None
@@ -45,12 +46,22 @@ class Renderer:
             self.clock = pygame.time.Clock()
 
     def draw(self, mode, planes, zones, wind_vector=None):
+        # 1. Initialize the display FIRST so convert_alpha() has a video mode to work with
+        if self.window is None:
+            if mode == "human":
+                self.init_window()
+            else:
+                # For video saving (rgb_array), Pygame still needs a hidden window for textures
+                pygame.init()
+                pygame.display.init()
+                self.window = pygame.display.set_mode((self.width, self.height), pygame.HIDDEN)
+                self.clock = pygame.time.Clock()
+
+        # 2. NOW load the assets
         if not self.assets_loaded:
             self._load_assets()
 
-        if self.window is None and mode == "human":
-            self.init_window()
-
+        # 3. Proceed with drawing
         canvas = pygame.Surface((self.width, self.height))
 
         if self.images.get("background"):
@@ -58,6 +69,8 @@ class Renderer:
             canvas.blit(bg, (0, 0))
         else:
             canvas.fill((34, 139, 34))
+
+        # ... (keep the rest of your draw method exactly the same) ...
 
         for zone in zones:
             self._draw_zone(canvas, zone)
@@ -156,6 +169,33 @@ class Renderer:
             wing2_y = zone.y - arrow_head_size * math.sin(zone.angle - 0.5)
 
             pygame.draw.polygon(surface, indicator_color, [(zone.x, zone.y), (wing1_x, wing1_y), (wing2_x, wing2_y)])
+
+            # --- NEW: DRAW THE APPROACH GATE ---
+            # Gate spans from dist 100 to 200 (length = 100)
+            # Gate is 30 pixels wide on each side (total width = 60)
+            gate_length = 100 
+            gate_width = 60   
+            
+            # Create a transparent surface for the gate
+            gate_surf = pygame.Surface((gate_length, gate_width), pygame.SRCALPHA)
+            
+            # Draw a glowing green box (RGBA: Red, Green, Blue, Alpha/Transparency)
+            gate_color = (0, 255, 0, 150) 
+            pygame.draw.rect(gate_surf, gate_color, (0, 0, gate_length, gate_width), 3)
+            
+            # Calculate where the center of this gate should be (150 pixels away from the runway)
+            gate_center_dist = 150
+            gate_cx = zone.x - gate_center_dist * math.cos(zone.angle)
+            gate_cy = zone.y - gate_center_dist * math.sin(zone.angle)
+            
+            # Rotate the gate to match the runway's angle perfectly
+            angle_deg = -math.degrees(zone.angle)
+            rotated_gate = pygame.transform.rotate(gate_surf, angle_deg)
+            gate_rect = rotated_gate.get_rect(center=(gate_cx, gate_cy))
+            
+            # Blit (paint) it onto the main surface
+            surface.blit(rotated_gate, gate_rect)
+            # -----------------------------------
 
     def _draw_plane(self, surface, plane):
         key = plane.type

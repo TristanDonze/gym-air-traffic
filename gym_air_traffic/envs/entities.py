@@ -9,6 +9,7 @@ class Aircraft:
         self.type = plane_type
         self.destination_id = destination_id
         self.active = True
+        self.passed_gate = False
         
         self.speed = float(speed)
         self.min_speed = 1.0
