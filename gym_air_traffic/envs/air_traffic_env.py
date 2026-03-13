@@ -108,11 +108,13 @@ class AirTrafficEnv(ParallelEnv):
         truncations = {agent: self.steps >= 1000 for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
         
+        # 1. Base time penalty
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
-                rewards[agent] -= 0.15 # This applies a flat time penalty every step to force the agent to land quickly instead of loitering.
+                rewards[agent] -= 0.15
 
+        # 2. Wind dynamics
         if self.enable_wind and self.max_wind_speed > 0:
             noise = np.random.uniform(-self.wind_change_rate, self.wind_change_rate, size=2)
             self.wind_vector += noise
@@ -120,9 +122,11 @@ class AirTrafficEnv(ParallelEnv):
             if current_wind_speed > self.max_wind_speed:
                 self.wind_vector = (self.wind_vector / current_wind_speed) * self.max_wind_speed
         
+        # 3. Agent action loop and reward calculations
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
+                # Apply actions
                 if agent in actions:
                     command = actions[agent]
                     plane.change_heading(command[0])
@@ -130,36 +134,75 @@ class AirTrafficEnv(ParallelEnv):
                         plane.change_speed(command[1])
                     plane.move(self.wind_vector)
                 
+                # --- THE MULTI-RUNWAY APPROACH GATE CHECK ---
+                for zone in self.zones:
+                    if zone.type != "helipad":
+                        # Calculate relative distance to THIS specific zone's gate
+                        dx_zone = zone.x - plane.x
+                        dy_zone = zone.y - plane.y
+                        
+                        zone_long = dx_zone * math.cos(zone.angle) + dy_zone * math.sin(zone.angle)
+                        zone_lat = -dx_zone * math.sin(zone.angle) + dy_zone * math.cos(zone.angle)
+                        
+                        # Is the plane inside this zone's approach gate? (100 to 200 pixels away)
+                        if 100.0 < zone_long < 200.0 and abs(zone_lat) < 30.0:
+                            if zone.id == plane.destination_id:
+                                # Correct Gate! Grant one-time reward.
+                                if not plane.passed_gate:
+                                    rewards[agent] += 150.0
+                                    plane.passed_gate = True
+                                    logger.info(f"{agent} perfectly passed through the correct gate!")
+                            else:
+                                # Wrong Gate! Continuous airspace violation penalty.
+                                rewards[agent] -= 2.0 
+                # --------------------------------------------
+                
                 target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
                 if target_zone:
                     dist_before = getattr(plane, "last_dist", math.sqrt((target_zone.x - plane.x)**2 + (target_zone.y - plane.y)**2))
                     dist_after = math.sqrt((target_zone.x - plane.x)**2 + (target_zone.y - plane.y)**2)
                     plane.last_dist = dist_after
                     
-                    rewards[agent] += (dist_before - dist_after) * 0.1 # This gives a positive reward if the distance to the target decreases, and a penalty if the distance increases.
+                    # Base distance reward (encourages generally flying toward the target)
+                    rewards[agent] += (dist_before - dist_after) * 0.1 
                     
+                    # --- THE GLIDE SLOPE & OVERSHOOT LOGIC ---
                     if target_zone.type != "helipad":
-                        dx = plane.x - target_zone.x 
-                        dy = plane.y - target_zone.y
+                        dx = target_zone.x - plane.x
+                        dy = target_zone.y - plane.y
                         
-                        target_dx = -math.cos(target_zone.angle)
-                        target_dy = -math.sin(target_zone.angle)
+                        longitudinal_dist = dx * math.cos(target_zone.angle) + dy * math.sin(target_zone.angle)
+                        lateral_dist = -dx * math.sin(target_zone.angle) + dy * math.cos(target_zone.angle)
                         
-                        dot_product = (dx * target_dx + dy * target_dy) / (dist_after + 1e-6)
-                        
-                        if dot_product > 0.9:
-                            lateral_dist = abs(dx * math.sin(target_zone.angle) - dy * math.cos(target_zone.angle))
-                            alignment_bonus = max(0.0, 1.0 - (lateral_dist / 40.0))
-                            rewards[agent] += alignment_bonus * 0.2
+                        if longitudinal_dist > 0: 
+                            # We are approaching the runway from the front
+                            cross_track_penalty = abs(lateral_dist) / 100.0
+                            rewards[agent] -= cross_track_penalty * 0.05
                             
-                            runway_diff = plane.heading - target_zone.angle
-                            runway_diff = (runway_diff + math.pi) % (2 * math.pi) - math.pi
-                            rewards[agent] += max(0.0, 1.0 - (abs(runway_diff) / 0.5)) * 0.1
+                            if abs(lateral_dist) < 50.0:
+                                runway_diff = plane.heading - target_zone.angle
+                                runway_diff = (runway_diff + math.pi) % (2 * math.pi) - math.pi
+                                alignment_bonus = max(0.0, 1.0 - (abs(runway_diff) / 0.5))
+                                rewards[agent] += alignment_bonus * 0.15
+                        else:
+                            # OVERSHOOT: We flew past the runway
+                            if abs(lateral_dist) < 100.0: 
+                                # Missed approach! Kill the episode so it can't circle.
+                                rewards[agent] -= 200.0   
+                                terminations[agent] = True 
+                                plane.active = False
+                                logger.info(f"Missed approach for {agent}. Episode terminated.")
+                            else:
+                                # Just flying away off-course
+                                rewards[agent] -= 0.5
+                    # -----------------------------------------
 
+        # 4. End-of-step state checks
         self._check_collisions(rewards, terminations)
         self._check_landings(rewards, terminations)
         self._check_out_of_bounds(rewards, terminations)
 
+        # Cleanup inactive planes
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is None or not plane.active:
@@ -297,8 +340,14 @@ class AirTrafficEnv(ParallelEnv):
         tx, ty = (target_zone.x, target_zone.y) if target_zone else (0.0, 0.0)
         t_angle = target_zone.angle if target_zone else 0.0
         
-        dx_target = (tx - plane.x) / self.width
-        dy_target = (ty - plane.y) / self.height
+        dx = (tx - plane.x)
+        dy = (ty - plane.y)
+
+        longitudinal_dist = dx * math.cos(t_angle) + dy * math.sin(t_angle)
+        lateral_dist = -dx * math.sin(t_angle) + dy * math.cos(t_angle)
+
+        longitudinal_norm = longitudinal_dist / self.width
+        lateral_norm = lateral_dist / self.height
         
         ideal_heading = math.atan2(ty - plane.y, tx - plane.x)
         relative_heading = plane.heading - ideal_heading
@@ -313,8 +362,8 @@ class AirTrafficEnv(ParallelEnv):
             math.sin(plane.heading), # sine of heading
             math.cos(relative_heading), # cosine of relative heading to target
             math.sin(relative_heading),# sine of relative heading to target
-            dx_target, # x distance to target normalized
-            dy_target, # y distance to target normalized
+            longitudinal_norm, # x distance to target normalized
+            lateral_norm, # y distance to target normalized
             math.cos(t_angle), # cosine of target zone angle
             math.sin(t_angle), # sine of target zone angle
             t_val # type of plane as a value between 0 and 1
