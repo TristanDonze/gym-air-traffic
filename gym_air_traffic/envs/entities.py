@@ -39,6 +39,16 @@ class Aircraft:
 
     def get_pos(self):
         return np.array([self.x, self.y])
+    
+    def get_mpc_raw_state(self):
+        return [
+            self.x, 
+            self.y, 
+            self.speed, 
+            self.heading, 
+            1.0 if self.active else 0.0, 
+            float(self.destination_id)
+        ]
 
 
 class LandingZone:
@@ -53,7 +63,7 @@ class LandingZone:
     def validate_landing(self, aircraft):
         dist = math.sqrt((self.x - aircraft.x)**2 + (self.y - aircraft.y)**2)
         
-        if dist > 20.0:
+        if math.isnan(dist) or dist > 20.0:
             return False
 
         is_match = False

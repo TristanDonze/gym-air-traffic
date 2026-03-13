@@ -384,22 +384,44 @@ class AirTrafficEnv(ParallelEnv):
             
             other_plane = self.planes_dict[other_agent]
             if other_plane is not None and other_plane.active:
-                dx = (other_plane.x - plane.x) / self.width # x distance to other plane normalized
-                dy = (other_plane.y - plane.y) / self.height # y distance to other plane normalized
-                dv = (other_plane.speed - plane.speed) / (plane.max_speed - plane.min_speed) # relative speed normalized
-                dhead = other_plane.heading - plane.heading # relative heading
+                dx = (other_plane.x - plane.x) / self.width
+                dy = (other_plane.y - plane.y) / self.height
+                dv = (other_plane.speed - plane.speed) / (plane.max_speed - plane.min_speed)
+                dhead = other_plane.heading - plane.heading
                 
-                obs_list.extend([dx, 
-                                 dy, 
-                                 dv, 
-                                 math.cos(dhead), 
-                                 math.sin(dhead), 
-                                 1.0 # indicator that this slot contains an active plane
-                                 ])
+                obs_list.extend([
+                    dx, dy, dv, math.cos(dhead), math.sin(dhead), 1.0
+                ])
             else:
                 obs_list.extend([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0])
 
         return np.array(obs_list, dtype=np.float32)
+
+    def get_mpc_state(self):
+        state_list = []
+        for agent in self.possible_agents:
+            plane = self.planes_dict[agent]
+            if plane is not None:
+                state_list.extend(plane.get_mpc_raw_state())
+            else:
+                state_list.extend([0.0, 0.0, 0.0, 0.0, 0.0, -1.0])
+                
+        if self.enable_wind:
+            state_list.extend([self.wind_vector[0], self.wind_vector[1]])
+            
+        return np.array(state_list, dtype=np.float32)
+    
+    def get_mpc_zones(self):
+        return {
+            zone.id: [
+                zone.x, 
+                zone.y, 
+                zone.angle, 
+                1.0 if zone.type == "helipad" else 0.0
+            ] 
+            for zone in self.zones
+        }
+
 
 if __name__ == "__main__":
     env = AirTrafficEnv(max_planes=4, enable_acceleration=False, enable_wind=False)
