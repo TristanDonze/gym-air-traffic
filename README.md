@@ -11,9 +11,8 @@ Gym Air Traffic is a 2D simulation where an AI must guide multiple aircraft to t
 * **Approach Gates & Airspace Rules:** Aircraft must pass through an invisible "approach gate" 100-200 pixels in front of their designated runway. Trespassing in the wrong runway's gate or skipping the gate entirely results in strict penalties.
 * **Physics-Based Movement & Smoothness:** Aircraft have inertia, turning rates, and optional acceleration. The environment actively penalizes jerky steering, forcing agents to fly smooth, realistic flight paths.
 * **Curriculum-Ready Spawning:** Aircraft spawn at safe distances in designated edge slots to prevent instant, unavoidable collisions upon reset.
-* **Diverse Traffic Types:** * **Red Jets:** Must land on the top Red Runway (East-facing).
-* **Blue Jets:** Must land on the bottom Blue Runway (East-facing).
-* *(Helicopters and Helipads are supported by the physics engine but are currently disabled in the standard spawn loop to focus on runway glide-slope training).*
+* **Diverse Traffic Types:**  **Red Jets:** Must land on the top Red Runway.
+* **Blue Jets:** Must land on the bottom Blue Runway.
 
 
 
