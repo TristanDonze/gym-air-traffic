@@ -1,12 +1,8 @@
-Here is a complete, updated `README.md` file tailored specifically to the latest version of your environment. It accurately reflects the new observation shapes, advanced radar features (like TCPA/DCPA), the multi-runway approach gates, the L1 Manhattan distance progress rewards, and the updated scaling of all penalties and bonuses.
-
----
-
 # Gym Air Traffic
 
-A custom Multi-Agent Reinforcement Learning (MARL) environment built on the **PettingZoo Parallel API**.
+A custom Multi-Agent Reinforcement Learning environment built on the **PettingZoo Parallel API**.
 
-Gym Air Traffic is a 2D physics-based simulation where an AI must guide multiple aircraft to their specific landing zones safely. Agents must learn complex airspace management, including speed control, collision avoidance, approach gate navigation, and precise runway alignment, all while compensating for dynamic wind conditions.
+Gym Air Traffic is a 2D simulation where an AI must guide multiple aircraft to their specific landing zones safely. Agents must learn complex airspace management, including speed control, collision avoidance, approach gate navigation, and precise runway alignment, all while compensating for dynamic wind conditions.
 
 ## Features
 
@@ -99,7 +95,7 @@ The remaining values represent the relative states of other aircraft. **Neighbor
 
 ### Rewards System
 
-The environment utilizes a heavily shaped dense reward system paired with terminal condition penalties to guide the MARL training process smoothly.
+The environment utilizes a shaped dense reward system paired with terminal condition penalties to guide the MARL training process.
 
 **Dense (Continuous) Rewards:**
 
