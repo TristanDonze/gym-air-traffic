@@ -108,11 +108,21 @@ class AirTrafficEnv(ParallelEnv):
         truncations = {agent: self.steps >= 1000 for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
         
+        # Create a dictionary to track if a runway is currently occupied
+        runway_occupied = {zone.id: False for zone in self.zones}
+
+        # Check all active planes to see if anyone is inside an approach gate
+        for agent in self.agents:
+            plane = self.planes_dict[agent]
+            if plane is not None and plane.active and plane.passed_gate:
+                # If they passed the gate but haven't landed yet, the runway is locked
+                runway_occupied[plane.destination_id] = True
+        
         # 1. Base time penalty
         for agent in self.agents:
             plane = self.planes_dict[agent]
             if plane is not None and plane.active:
-                rewards[agent] -= 0.15
+                rewards[agent] -= 0.01
 
         # 2. Wind dynamics
         if self.enable_wind and self.max_wind_speed > 0:
@@ -147,14 +157,20 @@ class AirTrafficEnv(ParallelEnv):
                         # Is the plane inside this zone's approach gate? (100 to 200 pixels away)
                         if 100.0 < zone_long < 200.0 and abs(zone_lat) < 30.0:
                             if zone.id == plane.destination_id:
-                                # Correct Gate! Grant one-time reward.
                                 if not plane.passed_gate:
-                                    rewards[agent] += 150.0
-                                    plane.passed_gate = True
-                                    logger.info(f"{agent} perfectly passed through the correct gate!")
+                                    # NEW: Check if the runway is occupied before granting the reward
+                                    if runway_occupied[zone.id]:
+                                        # Someone is already landing! Penalty for cutting in line.
+                                        rewards[agent] -= 5.0
+                                    else:
+                                        # Runway is clear! Claim it.
+                                        rewards[agent] += 150.0
+                                        plane.passed_gate = True
+                                        runway_occupied[zone.id] = True # Lock it immediately
+                                        logger.info(f"{agent} perfectly passed through the correct gate!")
                             else:
                                 # Wrong Gate! Continuous airspace violation penalty.
-                                rewards[agent] -= 2.0 
+                                rewards[agent] -= 2.0
                 # --------------------------------------------
                 
                 target_zone = next((z for z in self.zones if z.id == plane.destination_id), None)
@@ -185,15 +201,16 @@ class AirTrafficEnv(ParallelEnv):
                                 alignment_bonus = max(0.0, 1.0 - (abs(runway_diff) / 0.5))
                                 rewards[agent] += alignment_bonus * 0.15
                         else:
-                            # OVERSHOOT: We flew past the runway
-                            if abs(lateral_dist) < 100.0: 
-                                # Missed approach! Kill the episode so it can't circle.
+                            # We are physically behind the runway. 
+                            # Did we actually miss an approach, or are we just maneuvering?
+                            if plane.passed_gate and abs(lateral_dist) < 100.0: 
+                                # TRUE OVERSHOOT: Went through the gate, missed the landing.
                                 rewards[agent] -= 200.0   
                                 terminations[agent] = True 
                                 plane.active = False
                                 logger.info(f"Missed approach for {agent}. Episode terminated.")
                             else:
-                                # Just flying away off-course
+                                # MANEUVERING: Spawned here, or making a loop. Just a tiny drift penalty.
                                 rewards[agent] -= 0.5
                     # -----------------------------------------
 
