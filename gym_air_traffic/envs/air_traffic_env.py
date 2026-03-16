@@ -252,12 +252,16 @@ class AirTrafficEnv(ParallelEnv):
                         infos[agent]["approach_arm_event"] = True
                     
                     # 1. Retrieve the previous distances (or initialize them)
-                    dist_before_long = getattr(plane, "last_long_dist", longitudinal_dist)
+                    if target_zone.type != "helipad":
+                        longitudinal_error = abs(longitudinal_dist)
+                    else:
+                        longitudinal_error = longitudinal_dist
+                    dist_before_long = getattr(plane, "last_long_error", longitudinal_error)
                     dist_before_lat = getattr(plane, "last_lat_dist", abs(lateral_dist))
                     
                     # 2. Reward forward progress (closing the longitudinal gap)
                     rewards[agent] += self._clip_dense_reward(
-                        (dist_before_long - longitudinal_dist) * self.progress_reward_scale,
+                        (dist_before_long - longitudinal_error) * self.progress_reward_scale,
                         self.progress_reward_clip,
                     )
                     
@@ -268,7 +272,7 @@ class AirTrafficEnv(ParallelEnv):
                     )
                     
                     # 4. Save the current distances for the next step
-                    plane.last_long_dist = longitudinal_dist
+                    plane.last_long_error = longitudinal_error
                     plane.last_lat_dist = abs(lateral_dist)
                     
                     # 5. Smoothness Penalty (Steering)
