@@ -52,7 +52,7 @@ Only the Steering command (Index 0) is available. The aircraft will maintain its
 The observation space is ego-centric. Its size is calculated dynamically based on `max_planes` and `include_wind_in_obs`.
 **Total Shape:** `base_features + ((max_planes - 1) * 11)`
 
-#### Part 1: Ego State (Indices 0 to 12 or 14)
+#### Part 1: Ego State (Indices 0 to 13 or 15)
 
 Represents the current agent's state relative to its own specific landing zone:
 
@@ -70,9 +70,10 @@ Represents the current agent's state relative to its own specific landing zone:
 | 9 | `cos(target_angle)` | Cosine of the target landing zone angle. |
 | 10 | `sin(target_angle)` | Sine of the target landing zone angle. |
 | 11 | `type_val` | Plane identifier: 0.0 (Red Jet), 0.5 (Blue Jet). |
-| 12 | `passed_gate` | Boolean flag (1.0 or 0.0) indicating if the plane successfully flew through its approach gate. |
-| 13 | `wind_x` | *(Optional)* X component of the global wind vector (normalized). |
-| 14 | `wind_y` | *(Optional)* Y component of the global wind vector (normalized). |
+| 12 | `approach_armed` | Boolean flag (1.0 or 0.0) indicating whether the plane is committed to the current approach. |
+| 13 | `passed_gate` | Boolean flag (1.0 or 0.0) indicating if the plane successfully flew through its approach gate. |
+| 14 | `wind_x` | *(Optional)* X component of the global wind vector (normalized). |
+| 15 | `wind_y` | *(Optional)* Y component of the global wind vector (normalized). |
 
 #### Part 2: Radar State (Distance-Sorted Neighbors)
 
