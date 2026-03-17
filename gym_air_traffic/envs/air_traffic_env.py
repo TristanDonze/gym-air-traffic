@@ -48,7 +48,7 @@ class AirTrafficEnv(ParallelEnv):
         
         self.total_spawned = 0
         self.nb_active_agents = 0
-        self.helicopter_spawned = False
+        self.helicopter_spawned = True
         self.spawn_rate = 0.05 
         
         self.zones = [
